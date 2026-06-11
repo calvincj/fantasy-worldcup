@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚽ Fantasy World Cup 2026</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Identity modal ─────────────────────────────────────────────────── -->
+<div id="identity-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>👋 Who are you?</h2>
+    <p class="modal-sub">Pick your name — you'll use this for drafting and trades.</p>
+    <div id="identity-player-list"></div>
+  </div>
+</div>
+
+<!-- ── Trade propose modal ────────────────────────────────────────────── -->
+<div id="trade-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>🤝 Propose a Trade</h2>
+    <div class="trade-form">
+      <div class="trade-side">
+        <label>You offer:</label>
+        <select id="trade-offer-select"></select>
+      </div>
+      <div class="trade-arrow">⇄</div>
+      <div class="trade-side">
+        <label>Trade with:</label>
+        <select id="trade-target-select"></select>
+        <label style="margin-top:10px">You want:</label>
+        <select id="trade-request-select"></select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="trade-submit-btn" class="btn-primary">Send Offer</button>
+      <button id="trade-cancel-btn" class="btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Team detail modal ──────────────────────────────────────────────── -->
+<div id="team-modal" class="modal-overlay hidden">
+  <div class="modal-box wide">
+    <button id="team-modal-close" class="modal-close">✕</button>
+    <div id="team-modal-content"></div>
+  </div>
+</div>
+
+<!-- ── Admin score modal ──────────────────────────────────────────────── -->
+<div id="admin-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <button id="admin-modal-close" class="modal-close">✕</button>
+    <h2>🔧 Admin Panel</h2>
+    <p class="modal-sub">Admin key: <code>worldcup2026</code> (or set ADMIN_KEY env var)</p>
+    <input id="admin-key-input" class="text-input" type="password" placeholder="Admin key" value="worldcup2026">
+    <div id="admin-team-list"></div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <button id="reset-game-btn" class="btn-danger" style="width:100%">⚠️ Reset Game (commissioner only)</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── App shell ──────────────────────────────────────────────────────── -->
+<header id="app-header">
+  <div class="header-left">
+    <span class="logo">⚽ Fantasy World Cup 2026</span>
+  </div>
+  <nav id="main-nav" class="hidden">
+    <button class="tab-btn active" data-view="draft">Draft</button>
+    <button class="tab-btn" data-view="my-teams">My Teams</button>
+    <button class="tab-btn" data-view="all-teams">All Teams</button>
+    <button class="tab-btn" data-view="standings">Standings</button>
+    <button class="tab-btn" data-view="trades">Trades <span id="trade-badge" class="badge hidden">0</span></button>
+  </nav>
+  <div class="header-right">
+    <span id="identity-display" class="identity-chip hidden"></span>
+    <button id="change-identity-btn" class="btn-ghost small hidden">switch player</button>
+  </div>
+</header>
+
+<main id="app-main">
+
+  <!-- Setup view -->
+  <div id="setup-view" class="view active">
+    <div class="hero">
+      <div class="hero-icon">⚽</div>
+      <h1>Fantasy World Cup 2026</h1>
+      <p>Snake draft · 48 nations · Two podiums</p>
+    </div>
+    <div class="setup-card">
+      <h2>Commissioner Setup</h2>
+      <p class="setup-hint">Enter everyone's names, then start the draft. Everyone will pick their identity when they load the page.</p>
+      <div id="player-inputs">
+        <div class="player-input-row"><input class="text-input" type="text" placeholder="Player 1 name"></div>
+        <div class="player-input-row"><input class="text-input" type="text" placeholder="Player 2 name"></div>
+      </div>
+      <button id="add-player-btn" class="btn-ghost">+ Add Player</button>
+      <div class="setup-option">
+        <label>Teams per player:
+          <select id="teams-per-player" class="select-input">
+            <option value="3" selected>3 teams</option>
+            <option value="4">4 teams</option>
+          </select>
+        </label>
+      </div>
+      <button id="start-draft-btn" class="btn-primary large">Start Draft →</button>
+    </div>
+  </div>
+
+  <!-- Draft view -->
+  <div id="draft-view" class="view hidden">
+    <div class="draft-header">
+      <div id="pick-banner"></div>
+      <div class="draft-progress-bar"><div id="draft-progress-fill"></div></div>
+    </div>
+    <div class="draft-layout">
+      <aside class="draft-sidebar">
+        <h3>Draft Board</h3>
+        <div id="draft-board-list"></div>
+      </aside>
+      <div class="draft-main">
+        <div class="filter-bar">
+          <input id="draft-search" class="text-input search" type="text" placeholder="🔍 Search teams…">
+          <div class="filter-chips">
+            <button class="chip active" data-group="ALL">All</button>
+            <button class="chip" data-group="A">A</button>
+            <button class="chip" data-group="B">B</button>
+            <button class="chip" data-group="C">C</button>
+            <button class="chip" data-group="D">D</button>
+            <button class="chip" data-group="E">E</button>
+            <button class="chip" data-group="F">F</button>
+            <button class="chip" data-group="G">G</button>
+            <button class="chip" data-group="H">H</button>
+            <button class="chip" data-group="I">I</button>
+            <button class="chip" data-group="J">J</button>
+            <button class="chip" data-group="K">K</button>
+            <button class="chip" data-group="L">L</button>
+          </div>
+        </div>
+        <div id="available-teams-grid" class="teams-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- My Teams view -->
+  <div id="my-teams-view" class="view hidden">
+    <div class="view-header">
+      <h2>My Teams</h2>
+      <p id="my-teams-subtext" class="sub"></p>
+    </div>
+    <div id="my-teams-grid" class="teams-grid"></div>
+  </div>
+
+  <!-- All Teams view -->
+  <div id="all-teams-view" class="view hidden">
+    <div class="view-header">
+      <h2>All 48 Teams</h2>
+      <div class="filter-bar">
+        <input id="all-teams-search" class="text-input search" type="text" placeholder="🔍 Search…">
+        <div class="filter-chips">
+          <button class="chip active" data-group2="ALL">All</button>
+          <button class="chip" data-group2="A">A</button>
+          <button class="chip" data-group2="B">B</button>
+          <button class="chip" data-group2="C">C</button>
+          <button class="chip" data-group2="D">D</button>
+          <button class="chip" data-group2="E">E</button>
+          <button class="chip" data-group2="F">F</button>
+          <button class="chip" data-group2="G">G</button>
+          <button class="chip" data-group2="H">H</button>
+          <button class="chip" data-group2="I">I</button>
+          <button class="chip" data-group2="J">J</button>
+          <button class="chip" data-group2="K">K</button>
+          <button class="chip" data-group2="L">L</button>
+        </div>
+      </div>
+    </div>
+    <div id="all-teams-grid" class="teams-grid"></div>
+  </div>
+
+  <!-- Standings view -->
+  <div id="standings-view" class="view hidden">
+    <div class="view-header">
+      <h2>Standings</h2>
+      <button id="open-admin-btn" class="btn-ghost small">🔧 Update Scores</button>
+      <button id="sync-scores-btn" class="btn-ghost small hidden">🔄 Sync Live Scores</button>
+    </div>
+    <div class="podiums-row">
+      <div class="podium-card">
+        <h3>🏆 Tournament Placement</h3>
+        <p class="podium-desc">Who owns the teams that finish 1st · 2nd · 3rd?</p>
+        <div id="placement-podium"></div>
+      </div>
+      <div class="podium-card">
+        <h3>⚽ Most Goals Scored</h3>
+        <p class="podium-desc">Who owns the top goal-scoring teams?</p>
+        <div id="goals-podium"></div>
+      </div>
+    </div>
+    <div class="section-title">Group Stage</div>
+    <div id="group-stage-container" class="group-stage-grid"></div>
+
+    <div class="section-title" style="margin-top:28px">Knockout Bracket</div>
+    <div id="bracket-container" class="bracket-wrap"></div>
+  </div>
+
+  <!-- Trades view -->
+  <div id="trades-view" class="view hidden">
+    <div class="view-header">
+      <h2>Trade Center</h2>
+      <button id="propose-trade-btn" class="btn-primary">+ Propose Trade</button>
+    </div>
+    <div id="trades-list"></div>
+  </div>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

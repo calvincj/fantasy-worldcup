@@ -1,0 +1,339 @@
+const express = require('express');
+const path = require('path');
+const os = require('os');
+const { TEAMS } = require('./data/teams');
+
+function getLanIP() {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return 'localhost';
+}
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+const ADMIN_KEY = process.env.ADMIN_KEY || 'worldcup2026';
+const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY || '';
+
+// ── In-memory game state ─────────────────────────────────────────────────────
+
+let state = {
+  phase: 'setup',
+  players: [],
+  teamsPerPlayer: 3,
+  draftOrder: [],
+  pickIndex: 0,
+  availableTeamIds: TEAMS.map(t => t.id),
+  trades: [],
+  scores: {},            // { teamId: { goals, placement } }
+  groupStandings: {},    // { 'A': [{teamId,name,played,won,draw,lost,gf,ga,gd,points}] }
+  bracket: {},           // { GROUP_STAGE, ROUND_OF_32, ROUND_OF_16, QUARTER_FINALS, SEMI_FINALS, FINAL }
+  lastApiSync: 0,
+  apiEnabled: !!FOOTBALL_API_KEY,
+};
+
+TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, placement: null }; });
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildSnakeDraft(numPlayers, rounds) {
+  const order = [];
+  for (let r = 0; r < rounds; r++) {
+    const row = Array.from({ length: numPlayers }, (_, i) => i);
+    order.push(...(r % 2 === 0 ? row : [...row].reverse()));
+  }
+  return order;
+}
+
+function currentPicker() {
+  if (state.phase !== 'draft' || state.pickIndex >= state.draftOrder.length) return null;
+  return state.players[state.draftOrder[state.pickIndex]];
+}
+
+function findTeam(apiTeam) {
+  if (!apiTeam) return null;
+  return TEAMS.find(t =>
+    t.id === apiTeam.tla ||
+    t.name === apiTeam.name ||
+    t.name.toLowerCase().startsWith((apiTeam.name || '').toLowerCase().split(' ')[0])
+  ) || null;
+}
+
+// ── Standings / podiums (fantasy) ────────────────────────────────────────────
+
+function computeStandings() {
+  const teamsByGoals = Object.entries(state.scores)
+    .map(([id, s]) => ({ id, goals: s.goals, placement: s.placement }))
+    .sort((a, b) => b.goals - a.goals || a.id.localeCompare(b.id));
+
+  const goalsPodium = teamsByGoals.slice(0, 3).map((t, i) => {
+    const owner = state.players.find(p => p.teams.includes(t.id));
+    return { rank: i + 1, teamId: t.id, goals: t.goals, owner: owner?.name || '(undrafted)' };
+  });
+
+  const placedTeams = Object.entries(state.scores)
+    .filter(([, s]) => s.placement)
+    .map(([id, s]) => ({ id, placement: s.placement }))
+    .sort((a, b) => a.placement - b.placement);
+
+  const placementPodium = placedTeams.slice(0, 3).map(t => {
+    const owner = state.players.find(p => p.teams.includes(t.id));
+    return { rank: t.placement, teamId: t.id, owner: owner?.name || '(undrafted)' };
+  });
+
+  return { goalsPodium, placementPodium };
+}
+
+// ── Live data sync ───────────────────────────────────────────────────────────
+
+async function doSync() {
+  if (!FOOTBALL_API_KEY) return;
+  const now = Date.now();
+  if (now - state.lastApiSync < 60_000) return;
+  state.lastApiSync = now;
+
+  try {
+    // 1. All matches → goals + bracket
+    const mr = await fetch('https://api.football-data.org/v4/competitions/WC/matches', {
+      headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
+    });
+    if (mr.ok) {
+      const md = await mr.json();
+      // Reset goals
+      TEAMS.forEach(t => { state.scores[t.id].goals = 0; });
+
+      const byStage = {};
+      for (const m of md.matches || []) {
+        const stage = m.stage || 'UNKNOWN';
+        if (!byStage[stage]) byStage[stage] = [];
+
+        const home = findTeam(m.homeTeam);
+        const away = findTeam(m.awayTeam);
+        const hg = m.score?.fullTime?.home ?? m.score?.halfTime?.home ?? null;
+        const ag = m.score?.fullTime?.away ?? m.score?.halfTime?.away ?? null;
+
+        // Accumulate goals from finished / in-play matches
+        if (['FINISHED', 'IN_PLAY', 'PAUSED'].includes(m.status)) {
+          if (home && hg !== null) state.scores[home.id].goals += hg;
+          if (away && ag !== null) state.scores[away.id].goals += ag;
+        }
+
+        byStage[stage].push({
+          home: home?.id || m.homeTeam?.tla || 'TBD',
+          homeName: m.homeTeam?.name || 'TBD',
+          away: away?.id || m.awayTeam?.tla || 'TBD',
+          awayName: m.awayTeam?.name || 'TBD',
+          homeGoals: hg,
+          awayGoals: ag,
+          status: m.status,
+          utcDate: m.utcDate,
+          matchday: m.matchday,
+        });
+      }
+      state.bracket = byStage;
+    }
+
+    // 2. Group standings
+    const sr = await fetch('https://api.football-data.org/v4/competitions/WC/standings', {
+      headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
+    });
+    if (sr.ok) {
+      const sd = await sr.json();
+      state.groupStandings = {};
+      for (const grp of sd.standings || []) {
+        if (grp.type !== 'TOTAL') continue;
+        const letter = (grp.group || '').replace('GROUP_', '');
+        if (!letter) continue;
+        state.groupStandings[letter] = (grp.table || []).map(row => ({
+          teamId: findTeam(row.team)?.id || row.team?.tla || '?',
+          name: row.team?.name || '?',
+          played: row.playedGames || 0,
+          won: row.won || 0,
+          draw: row.draw || 0,
+          lost: row.lost || 0,
+          gf: row.goalsFor || 0,
+          ga: row.goalsAgainst || 0,
+          gd: row.goalDifference || 0,
+          points: row.points || 0,
+        }));
+      }
+    }
+
+    console.log(`[sync] goals + standings updated`);
+  } catch (e) {
+    console.error('[sync] error:', e.message);
+  }
+}
+
+// ── API routes ───────────────────────────────────────────────────────────────
+
+app.get('/api/teams', (_, res) => res.json(TEAMS));
+
+app.get('/api/state', (_, res) => {
+  const picker = currentPicker();
+  res.json({
+    phase: state.phase,
+    players: state.players,
+    teamsPerPlayer: state.teamsPerPlayer,
+    pickIndex: state.pickIndex,
+    totalPicks: state.draftOrder.length,
+    currentPickerId: picker?.id || null,
+    currentPickerName: picker?.name || null,
+    availableTeamIds: state.availableTeamIds,
+    trades: state.trades,
+    scores: state.scores,
+    standings: computeStandings(),
+    groupStandings: state.groupStandings,
+    bracket: state.bracket,
+    apiEnabled: state.apiEnabled,
+    lastSync: state.lastApiSync,
+  });
+});
+
+app.post('/api/setup', (req, res) => {
+  const { players, teamsPerPlayer } = req.body;
+  if (state.phase !== 'setup') return res.status(400).json({ error: 'Game already started' });
+  if (!Array.isArray(players) || players.length < 2) return res.status(400).json({ error: 'Need at least 2 players' });
+
+  state.players = players.map((name, i) => ({ id: `p${i}`, name: name.trim(), teams: [] }));
+  state.teamsPerPlayer = teamsPerPlayer || 3;
+  state.draftOrder = buildSnakeDraft(state.players.length, state.teamsPerPlayer);
+  state.pickIndex = 0;
+  state.availableTeamIds = TEAMS.map(t => t.id);
+  state.trades = [];
+  TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, placement: null }; });
+  state.phase = 'draft';
+
+  console.log(`Game started: ${state.players.length} players, ${state.teamsPerPlayer} picks each`);
+  res.json({ success: true });
+});
+
+app.post('/api/draft/pick', (req, res) => {
+  const { playerId, teamId } = req.body;
+  if (state.phase !== 'draft') return res.status(400).json({ error: 'Not in draft phase' });
+
+  const picker = currentPicker();
+  if (!picker || picker.id !== playerId) return res.status(403).json({ error: 'Not your turn' });
+  if (!state.availableTeamIds.includes(teamId)) return res.status(400).json({ error: 'Team not available' });
+
+  picker.teams.push(teamId);
+  state.availableTeamIds = state.availableTeamIds.filter(id => id !== teamId);
+  state.pickIndex++;
+
+  if (state.pickIndex >= state.draftOrder.length) {
+    state.phase = 'active';
+    console.log('Draft complete — game is now active');
+    if (FOOTBALL_API_KEY) doSync();
+  }
+
+  res.json({ success: true, phase: state.phase });
+});
+
+app.post('/api/trade/propose', (req, res) => {
+  const { fromId, toId, offerTeamId, requestTeamId } = req.body;
+  const from = state.players.find(p => p.id === fromId);
+  const to = state.players.find(p => p.id === toId);
+  if (!from || !to) return res.status(400).json({ error: 'Unknown player' });
+  if (!from.teams.includes(offerTeamId)) return res.status(400).json({ error: "You don't own that team" });
+  if (!to.teams.includes(requestTeamId)) return res.status(400).json({ error: "They don't own that team" });
+
+  state.trades = state.trades.filter(t =>
+    !(t.fromId === fromId && t.toId === toId && t.status === 'pending')
+  );
+
+  const trade = { id: `t${Date.now()}`, fromId, toId, offerTeamId, requestTeamId, status: 'pending', ts: Date.now() };
+  state.trades.push(trade);
+  res.json({ success: true, tradeId: trade.id });
+});
+
+app.post('/api/trade/respond', (req, res) => {
+  const { tradeId, playerId, accept } = req.body;
+  const trade = state.trades.find(t => t.id === tradeId && t.status === 'pending');
+  if (!trade) return res.status(404).json({ error: 'Trade not found' });
+  if (trade.toId !== playerId) return res.status(403).json({ error: 'Not your trade to respond to' });
+
+  if (accept) {
+    const from = state.players.find(p => p.id === trade.fromId);
+    const to = state.players.find(p => p.id === trade.toId);
+    if (!from.teams.includes(trade.offerTeamId) || !to.teams.includes(trade.requestTeamId)) {
+      trade.status = 'cancelled';
+      return res.status(400).json({ error: 'Teams no longer owned — trade cancelled' });
+    }
+    from.teams = from.teams.filter(t => t !== trade.offerTeamId);
+    from.teams.push(trade.requestTeamId);
+    to.teams = to.teams.filter(t => t !== trade.requestTeamId);
+    to.teams.push(trade.offerTeamId);
+    trade.status = 'accepted';
+  } else {
+    trade.status = 'rejected';
+  }
+
+  res.json({ success: true });
+});
+
+app.post('/api/trade/cancel', (req, res) => {
+  const { tradeId, playerId } = req.body;
+  const trade = state.trades.find(t => t.id === tradeId && t.status === 'pending');
+  if (!trade) return res.status(404).json({ error: 'Trade not found' });
+  if (trade.fromId !== playerId) return res.status(403).json({ error: 'Not your trade' });
+  trade.status = 'cancelled';
+  res.json({ success: true });
+});
+
+app.post('/api/scores', (req, res) => {
+  const { adminKey, teamId, goals, placement } = req.body;
+  if (adminKey !== ADMIN_KEY) return res.status(403).json({ error: 'Bad admin key' });
+  if (!state.scores[teamId]) return res.status(404).json({ error: 'Unknown team' });
+  if (goals !== undefined) state.scores[teamId].goals = parseInt(goals, 10) || 0;
+  if (placement !== undefined) state.scores[teamId].placement = placement ? parseInt(placement, 10) : null;
+  res.json({ success: true });
+});
+
+app.post('/api/sync-scores', async (req, res) => {
+  if (!FOOTBALL_API_KEY) return res.status(400).json({ error: 'No API key configured' });
+  state.lastApiSync = 0; // force bypass rate limit
+  try {
+    await doSync();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/reset', (req, res) => {
+  const { adminKey } = req.body;
+  if (adminKey !== ADMIN_KEY) return res.status(403).json({ error: 'Bad admin key' });
+  state.phase = 'setup';
+  state.players = [];
+  state.draftOrder = [];
+  state.pickIndex = 0;
+  state.availableTeamIds = TEAMS.map(t => t.id);
+  state.trades = [];
+  state.groupStandings = {};
+  state.bracket = {};
+  TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, placement: null }; });
+  console.log('Game reset');
+  res.json({ success: true });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  const lanIP = getLanIP();
+  console.log(`\n⚽  Fantasy World Cup 2026`);
+  console.log(`   Local:   http://localhost:${PORT}`);
+  console.log(`   Network: http://${lanIP}:${PORT}  ← share this with players`);
+  console.log(`   Admin key: ${ADMIN_KEY}`);
+  if (FOOTBALL_API_KEY) {
+    console.log(`   Live scores: enabled — auto-sync every 5 min`);
+    // Initial sync + auto-sync every 5 minutes
+    doSync();
+    setInterval(doSync, 5 * 60 * 1000);
+  } else {
+    console.log(`   Live scores: disabled (set FOOTBALL_API_KEY to enable)`);
+  }
+  console.log('');
+});
