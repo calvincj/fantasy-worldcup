@@ -368,27 +368,26 @@ function renderStandings(s) {
 
   // ── Podium 2: Goal Difference ────────────────────────────────────────────
   const gp = document.getElementById('goals-podium');
-  const hasGoals = s.standings.goalsPodium.some(r => r.totalGoals > 0);
-  if (!hasGoals) {
-    gp.innerHTML = '<div class="podium-empty">Appears once matches begin.</div>';
+  if (!s.standings.goalsPodium?.length) {
+    gp.innerHTML = '<div class="podium-empty">Start a draft to see standings.</div>';
   } else {
     gp.innerHTML = s.standings.goalsPodium.map((row, i) => {
-      const netStr = row.totalNet >= 0 ? `+${row.totalNet}` : `${row.totalNet}`;
+      const netStr = row.totalNet > 0 ? `+${row.totalNet}` : `${row.totalNet}`;
       const breakdown = row.teams.map(t => {
         const team = local.allTeams.find(tm => tm.id === t.id);
-        const tNet = t.net >= 0 ? `+${t.net}` : `${t.net}`;
+        const tNet = t.net > 0 ? `+${t.net}` : `${t.net}`;
         return `<div class="gd-team-row">
           <span>${team?.flag || ''} ${team?.name || t.id}</span>
-          <span class="gd-team-net ${t.net >= 0 ? 'pos' : 'neg'}">${tNet}</span>
+          <span class="gd-team-net ${t.net > 0 ? 'pos' : t.net < 0 ? 'neg' : ''}">${tNet}</span>
           <span class="gd-team-detail">(${t.goals}–${t.conceded})</span>
         </div>`;
       }).join('');
       return `<div class="podium-row">
-        <div class="podium-medal">${medals[i] || `${i+1}.`}</div>
+        <div class="podium-medal">${medals[i] || `${i + 1}.`}</div>
         <div class="podium-info">
           <div class="podium-owner-row">
             <span class="podium-owner">${row.owner}</span>
-            <span class="podium-net ${row.totalNet >= 0 ? 'pos' : 'neg'}">${netStr} GD</span>
+            <span class="podium-net ${row.totalNet > 0 ? 'pos' : row.totalNet < 0 ? 'neg' : ''}">${netStr} GD</span>
             <span class="podium-gd-detail">(${row.totalGoals} scored – ${row.totalConceded} conceded)</span>
           </div>
           <div class="gd-breakdown">${breakdown}</div>
