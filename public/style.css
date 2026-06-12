@@ -777,7 +777,7 @@ h1, h2, h3, h4,
   transition: background 0.3s;
 }
 .star-init { font-size: 15px; font-weight: 700; color: #fff; line-height: 1; }
-.star-name { font-size: 12px; font-weight: 600; text-align: center; color: var(--text); }
+.star-name { font-size: 12px; font-weight: 600; text-align: center; color: var(--text); word-break: break-word; overflow-wrap: break-word; width: 100%; }
 .star-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: center; }
 .star-num-badge { font-size: 11px; color: var(--muted); font-weight: 600; }
 .star-val  { font-size: 11px; color: var(--green); font-weight: 600; }

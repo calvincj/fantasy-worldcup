@@ -581,16 +581,129 @@ const JERSEY_NUMS = {
   MF: [6, 8, 10, 14, 17, 18, 19, 20],
   FW: [7, 9, 11, 21, 22, 25],
 };
+
+// Real jersey numbers (national team where known, else primary club number)
+const KNOWN_NUMBERS = {
+  // Czech Republic
+  'Tomáš Souček': 6, 'Lukáš Provod': 17, 'Patrik Schick': 14,
+  // Mexico
+  'Edson Álvarez': 4, 'Hirving Lozano': 22, 'Santiago Giménez': 9,
+  // South Africa
+  'Themba Zwane': 10, 'Percy Tau': 11, 'Evidence Makgopa': 9,
+  // South Korea
+  'Son Heung-min': 7, 'Lee Kang-in': 17, 'Hwang Hee-chan': 11,
+  // Bosnia-Herzegovina
+  'Anel Ahmedhodžić': 6, 'Amir Hadziahmetovic': 8, 'Ermedin Demirović': 9,
+  // Canada
+  'Alphonso Davies': 12, 'Jonathan David': 9, 'Tajon Buchanan': 14,
+  // Qatar
+  'Hassan Al-Haydos': 10, 'Akram Afif': 11, 'Almoez Ali': 19,
+  // Switzerland
+  'Granit Xhaka': 10, 'Xherdan Shaqiri': 23, 'Ruben Vargas': 15,
+  // Brazil
+  'Vinicius Jr.': 7, 'Rodrygo': 11, 'Endrick': 9,
+  // Haiti
+  'Duckens Nazon': 7, 'Frantzdy Pierrot': 11, 'Steeven Saba': 9,
+  // Morocco
+  'Achraf Hakimi': 2, 'Hakim Ziyech': 7, 'Youssef En-Nesyri': 9,
+  // Scotland
+  'Andrew Robertson': 3, 'Scott McTominay': 6, 'Che Adams': 9, 'Cameron Devlin': 14,
+  // Australia
+  'Mathew Leckie': 7, 'Martin Boyle': 11,
+  // Paraguay
+  'Miguel Almirón': 10, 'Julio Enciso': 17, 'Antonio Sanabria': 9,
+  // Turkey
+  'Hakan Çalhanoğlu': 10, 'Arda Güler': 20, 'Kerem Aktürkoğlu': 11,
+  // USA
+  'Christian Pulisic': 10, 'Gio Reyna': 7, 'Ricardo Pepi': 9,
+  // Curaçao
+  'Leandro Bacuna': 4, 'Elson Hooi': 9, 'Gevaro Nepomuceno': 7,
+  // Ecuador
+  'Moisés Caicedo': 6, 'Kendry Páez': 10, 'Gonzalo Plata': 11,
+  // Germany
+  'Florian Wirtz': 10, 'Jamal Musiala': 14, 'Kai Havertz': 7,
+  // Ivory Coast
+  'Franck Kessié': 8, 'Sébastien Haller': 9, 'Simon Adingra': 11,
+  // Japan
+  'Ritsu Doan': 7, 'Kaoru Mitoma': 11, 'Takumi Minamino': 9,
+  // Netherlands
+  'Xavi Simons': 6, 'Cody Gakpo': 11, 'Memphis Depay': 10,
+  // Sweden
+  'Dejan Kulusevski': 21, 'Emil Forsberg': 10, 'Alexander Isak': 23,
+  // Tunisia
+  'Hannibal Mejbri': 8, 'Ellyes Skhiri': 6, 'Wahbi Khazri': 9,
+  // Belgium
+  'Kevin De Bruyne': 7, 'Romelu Lukaku': 9, 'Jérémy Doku': 11,
+  // Egypt
+  'Mohamed Salah': 10, 'Omar Marmoush': 7, 'Mostafa Mohamed': 9,
+  // Iran
+  'Mehdi Taremi': 9, 'Sardar Azmoun': 10, 'Alireza Jahanbakhsh': 11,
+  // New Zealand
+  'Chris Wood': 9, 'Liberato Cacace': 3, 'Hamish Watson': 14,
+  // Cabo Verde
+  'Djaniny': 9, 'Garry Rodrigues': 7, 'Ryan Mendes': 10,
+  // Saudi Arabia
+  'Salem Al-Dawsari': 10, 'Firas Al-Buraikan': 9, 'Saleh Al-Shehri': 11,
+  // Spain
+  'Pedri': 26, 'Lamine Yamal': 19, 'Álvaro Morata': 7,
+  // Uruguay
+  'Federico Valverde': 8, 'Darwin Núñez': 19, 'Rodrigo Bentancur': 14,
+  // France
+  'Kylian Mbappé': 10, 'Antoine Griezmann': 7, 'Ousmane Dembélé': 11,
+  // Iraq
+  'Ali Adnan': 3, 'Ahmed Yasin': 11, 'Aymen Hussein': 9,
+  // Norway
+  'Erling Haaland': 9, 'Martin Ødegaard': 8, 'Alexander Sørloth': 10,
+  // Senegal
+  'Sadio Mané': 10, 'Ismaïla Sarr': 11, 'Idrissa Gana Gueye': 5,
+  // Algeria
+  'Riyad Mahrez': 7, 'Islam Slimani': 9, 'Youcef Belaïli': 11,
+  // Argentina
+  'Rodrigo De Paul': 7, 'Lautaro Martínez': 22, 'Julián Álvarez': 9,
+  // Austria
+  'Marcel Sabitzer': 8, 'Christoph Baumgartner': 10, 'Marko Arnautović': 9,
+  // Jordan
+  'Musa Al-Taamari': 7, 'Yazan Al-Naimat': 9, 'Baha Faisal': 11,
+  // Colombia
+  'James Rodríguez': 10, 'Luis Díaz': 7, 'Jhon Durán': 9,
+  // DR Congo
+  'Dodi Lukébakio': 11, 'Cédric Bakambu': 9, 'Samuel Moutoussamy': 8,
+  // Portugal
+  'Cristiano Ronaldo': 7, 'Bruno Fernandes': 8, 'Bernardo Silva': 10, 'Rafael Leão': 11,
+  // Uzbekistan
+  'Eldor Shomurodov': 9, 'Jaloliddin Masharipov': 10, 'Abbosbek Fayzullaev': 7,
+  // Croatia
+  'Luka Modrić': 10, 'Mateo Kovačić': 8, 'Ivan Perišić': 4,
+  // England
+  'Harry Kane': 9, 'Jude Bellingham': 10, 'Bukayo Saka': 7,
+  // Ghana
+  'Mohammed Kudus': 14, 'Iñaki Williams': 9, 'Jordan Ayew': 11,
+  // Panama
+  'Adalberto Carrasquilla': 8, 'Ismael Díaz': 11, 'Rolando Blackburn': 9,
+};
 const POS_COLORS = { GK: '#b45309', DF: '#1d4ed8', MF: '#15803d', FW: '#b91c1c' };
 const POS_FULL = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
 
 function assignJerseyNumbers(roster) {
+  const assigned = new Set();
+  // First pass: assign known numbers
+  const withKnown = roster.map(p => {
+    const known = KNOWN_NUMBERS[p.name];
+    if (known) { assigned.add(known); return { ...p, number: known }; }
+    return { ...p, number: null };
+  });
+  // Second pass: fill in the rest sequentially, skipping taken numbers
   const counters = { GK: 0, DF: 0, MF: 0, FW: 0 };
-  return roster.map(p => {
+  return withKnown.map(p => {
+    if (p.number !== null) return p;
     const pos = p.pos || 'FW';
     const nums = JERSEY_NUMS[pos] || JERSEY_NUMS.FW;
-    const num = nums[counters[pos]] ?? (counters[pos] + 26);
-    counters[pos] = (counters[pos] || 0) + 1;
+    let num;
+    do {
+      num = nums[counters[pos]] ?? (counters[pos] + 26);
+      counters[pos]++;
+    } while (assigned.has(num));
+    assigned.add(num);
     return { ...p, number: num };
   });
 }
@@ -618,13 +731,18 @@ function formationPlayerHTML(p) {
   const val = playerValue(p);
   const init = playerInitials(p.name);
   const color = POS_COLORS[p.pos] || '#374151';
-  const lastName = p.name.split(' ').pop();
+  const SUFFIXES = new Set(['jr.','jr','sr.','sr','ii','iii','iv','v']);
+  const parts = p.name.split(' ');
+  const meaningful = parts.filter(w => !SUFFIXES.has(w.toLowerCase()));
+  const displayName = meaningful.length >= 2
+    ? meaningful.slice(-2).join(' ')
+    : (meaningful[0] || parts[0]);
   return `<div class="fp${p.star ? ' fp-star' : ''}">
     <div class="fp-avatar" style="background:${color}">
       <span class="fp-init">${init}</span>
       <span class="fp-num">#${p.number}</span>
     </div>
-    <div class="fp-name" title="${p.name}">${lastName}</div>
+    <div class="fp-name" title="${p.name}">${displayName}</div>
     <div class="fp-val">$${val}M</div>
   </div>`;
 }
