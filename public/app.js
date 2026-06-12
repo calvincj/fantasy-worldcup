@@ -16,6 +16,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   await poll();
   bindStaticEvents();
   startPolling();
+  // Sync live scores on every page load (fire-and-forget, next poll picks up results)
+  if (local.server?.phase === 'active' && local.server?.apiEnabled) {
+    api('/api/sync-scores', { method: 'POST' });
+  }
 });
 
 function startPolling() {

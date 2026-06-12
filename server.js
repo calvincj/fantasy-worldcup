@@ -223,7 +223,7 @@ async function doSync() {
       state.groupStandings = {};
       for (const grp of sd.standings || []) {
         if (grp.type !== 'TOTAL') continue;
-        const letter = (grp.group || '').replace('GROUP_', '');
+        const letter = (grp.group || '').replace('GROUP_', '').replace('Group ', '').trim();
         if (!letter) continue;
         state.groupStandings[letter] = (grp.table || []).map(row => ({
           teamId: findTeam(row.team)?.id || row.team?.tla || '?',
