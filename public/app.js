@@ -5,9 +5,8 @@ const local = {
   server: null,
   allTeams: [],
   draftGroupFilter: 'ALL',
-  allTeamsGroupFilter: 'ALL',
   draftSearch: '',
-  allTeamsSearch: '',
+  waiverPickup: null,
   pollTimer: null,
 };
 
@@ -55,15 +54,11 @@ function render(s) {
     if (local.activeView === 'setup') showView('draft');
     renderDraft(s);
   } else {
-    if (local.activeView === 'setup' || local.activeView === 'draft') {
-      // Draft just completed — switch to my teams
-      showView('my-teams');
-    }
+    if (local.activeView === 'setup') showView('draft');
   }
 
   renderDraft(s);
   renderMyTeams(s);
-  renderAllTeams(s);
   renderStandings(s);
   renderTrades(s);
 
@@ -111,8 +106,11 @@ function renderDraft(s) {
       ? `🎉 Your pick! (Pick ${s.pickIndex + 1} of ${s.totalPicks})`
       : `⏳ Waiting for ${s.currentPickerName || '?'} to pick… (${s.pickIndex + 1}/${s.totalPicks})`;
     banner.className = isMyTurn ? 'your-turn' : '';
+  } else if (s.availableTeamIds.length > 0) {
+    banner.textContent = '🔄 Waiver Wire — pick up any undrafted team by dropping one of yours.';
+    banner.className = 'waiver-banner';
   } else {
-    banner.textContent = '✅ Draft complete! Game is live.';
+    banner.textContent = '✅ Draft complete — all teams are owned.';
     banner.className = '';
   }
   fill.style.width = pct + '%';
@@ -184,28 +182,57 @@ function playerColor(idx) { return PLAYER_COLORS[idx % PLAYER_COLORS.length]; }
 function renderAvailableTeams(s) {
   const grid = document.getElementById('available-teams-grid');
   const isMyTurn = s.phase === 'draft' && s.currentPickerId === local.playerId;
+  const waiverMode = s.phase === 'active' && s.availableTeamIds.length > 0;
+  const me = s.players.find(p => p.id === local.playerId);
+  const query = (local.draftSearch || '').toLowerCase();
+  const groups = ['A','B','C','D','E','F','G','H','I','J','K','L'];
 
-  let teams = local.allTeams.filter(t => s.availableTeamIds.includes(t.id));
-
-  // Filter by group
-  if (local.draftGroupFilter !== 'ALL') teams = teams.filter(t => t.group === local.draftGroupFilter);
-  if (local.draftSearch) {
-    const q = local.draftSearch.toLowerCase();
-    teams = teams.filter(t => t.name.toLowerCase().includes(q) || t.id.toLowerCase().includes(q));
+  // Waiver drop panel — shown when user has selected a team to pick up
+  let waiverPanel = '';
+  if (waiverMode && local.waiverPickup && me) {
+    const pickup = local.allTeams.find(t => t.id === local.waiverPickup);
+    const dropOptions = me.teams.map(id => {
+      const t = local.allTeams.find(t => t.id === id);
+      return t ? `<button class="waiver-drop-btn" onclick="confirmWaiverDrop('${id}')">${t.flag} ${t.name}</button>` : '';
+    }).join('');
+    waiverPanel = `<div class="waiver-panel">
+      <div class="waiver-panel-title">Pick up ${pickup?.flag || ''} <strong>${pickup?.name || local.waiverPickup}</strong> — drop which team?</div>
+      <div class="waiver-drop-options">${dropOptions}</div>
+      <button class="waiver-cancel-btn" onclick="cancelWaiver()">Cancel</button>
+    </div>`;
   }
 
-  if (teams.length === 0) {
-    grid.innerHTML = '<p class="text-sub" style="padding:24px">No teams match.</p>';
-    return;
+  let sectionsHtml = '';
+  for (const g of groups) {
+    let teams = local.allTeams.filter(t => t.group === g);
+    if (query) teams = teams.filter(t => t.name.toLowerCase().includes(query) || t.id.toLowerCase().includes(query));
+    if (!teams.length) continue;
+
+    sectionsHtml += `<div class="draft-group-section"><div class="draft-group-title">Group ${g}</div>`;
+    for (const t of teams) {
+      const available = s.availableTeamIds.includes(t.id);
+      const owner = s.players.find(p => p.teams.includes(t.id));
+      const isMine = owner?.id === local.playerId;
+      const pickable = isMyTurn && available;
+      const waiverPickable = waiverMode && available && me && !local.waiverPickup;
+      const isSelectedPickup = local.waiverPickup === t.id;
+      const clickAttr = pickable ? ` onclick="makePick('${t.id}')"` :
+                        waiverPickable ? ` onclick="selectWaiverPickup('${t.id}')"` : '';
+      sectionsHtml += `<div class="draft-team-row${!available ? ' taken' : ''}${pickable || waiverPickable ? ' pickable' : ''}${isSelectedPickup ? ' waiver-selected' : ''}"${clickAttr}>
+        <span class="draft-row-flag">${t.flag}</span>
+        <span class="draft-row-name">${t.name}</span>
+        ${!available ? `<span class="draft-row-owner">${isMine ? '✓ Mine' : (owner?.name || 'Taken')}</span>` : ''}
+        ${pickable ? '<span class="draft-row-hint">← pick</span>' : ''}
+        ${waiverPickable ? '<span class="draft-row-hint">+ pick up</span>' : ''}
+        ${isSelectedPickup ? '<span class="draft-row-hint selected">← selected</span>' : ''}
+      </div>`;
+    }
+    sectionsHtml += '</div>';
   }
 
-  grid.innerHTML = teams.map(t => teamCardHTML(t, {
-    showPickBtn: isMyTurn,
-    available: true,
-    owner: null,
-    isMine: false,
-    draftMode: true,
-  })).join('');
+  grid.innerHTML = (waiverPanel || '') + (sectionsHtml
+    ? `<div class="draft-groups-grid">${sectionsHtml}</div>`
+    : '<p class="text-sub" style="padding:24px">No teams match.</p>');
 }
 
 // ── My Teams view ────────────────────────────────────────────────────────────
@@ -228,39 +255,81 @@ function renderMyTeams(s) {
     const team = local.allTeams.find(t => t.id === id);
     if (!team) return '';
     const score = s.scores[id] || {};
-    return `<div class="team-card mine my-team-card" onclick="openTeamModal('${id}')">
-      <div class="team-card-flag">${team.flag}</div>
-      <div class="team-card-name">${team.name}</div>
-      <div class="team-card-conf">${team.confederation}</div>
-      <div class="team-card-stars">
-        ${team.stars.map(star => `<div class="star-row">${star}</div>`).join('')}
+
+    // W/D/L/Pts — from API standings if available, else compute from matches
+    const standing = Object.values(s.groupStandings).flat().find(r => r.teamId === id);
+    let stats = { won: 0, draw: 0, lost: 0, points: 0 };
+    if (standing) {
+      stats = { won: standing.won, draw: standing.draw, lost: standing.lost, points: standing.points };
+    } else {
+      for (const m of (s.bracket.GROUP_STAGE || [])) {
+        if (m.status !== 'FINISHED') continue;
+        if (m.home !== id && m.away !== id) continue;
+        const isHome = m.home === id;
+        const gf = isHome ? m.homeGoals : m.awayGoals;
+        const ga = isHome ? m.awayGoals : m.homeGoals;
+        if (gf == null || ga == null) continue;
+        if (gf > ga) stats.won++;
+        else if (gf === ga) stats.draw++;
+        else stats.lost++;
+      }
+      stats.points = stats.won * 3 + stats.draw;
+    }
+
+    // Match history
+    const matches = (s.bracket.GROUP_STAGE || []).filter(m => m.home === id || m.away === id);
+    const matchRows = matches.map(m => {
+      const isHome = m.home === id;
+      const oppId = isHome ? m.away : m.home;
+      const oppName = isHome ? m.awayName : m.homeName;
+      const gf = isHome ? m.homeGoals : m.awayGoals;
+      const ga = isHome ? m.awayGoals : m.homeGoals;
+      const opp = local.allTeams.find(t => t.id === oppId);
+      const dateStr = m.utcDate ? new Date(m.utcDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+      let cls = '', scoreStr = 'upcoming';
+      if (m.status === 'FINISHED' && gf != null && ga != null) {
+        scoreStr = `${gf} – ${ga}`;
+        cls = gf > ga ? 'mh-win' : gf === ga ? 'mh-draw' : 'mh-loss';
+      } else if (m.status === 'IN_PLAY' || m.status === 'PAUSED') {
+        scoreStr = `${gf ?? 0} – ${ga ?? 0}`;
+        cls = 'mh-live';
+      }
+      return `<div class="mh-row ${cls}">
+        <span class="mh-opp">${opp?.flag || ''} ${oppName}</span>
+        <span class="mh-score">${scoreStr}</span>
+        ${dateStr ? `<span class="mh-date">${dateStr}</span>` : ''}
+      </div>`;
+    }).join('');
+
+    return `<div class="mtc" onclick="openTeamModal('${id}')">
+      <div class="mtc-header">
+        <span class="mtc-flag">${team.flag}</span>
+        <div class="mtc-meta">
+          <div class="mtc-name">${team.name}</div>
+          <div class="mtc-conf">${team.confederation}</div>
+        </div>
+        ${score.placement ? `<span class="mtc-place">🏆 ${ordinal(score.placement)}</span>` : ''}
       </div>
-      <div style="margin-top:12px;display:flex;gap:12px;font-size:14px;">
-        <span>⚽ <strong>${score.goals || 0}</strong> goals</span>
-        ${score.placement ? `<span>🏆 <strong>${ordinal(score.placement)}</strong> place</span>` : ''}
+
+      <div class="mtc-stats">
+        <div class="mtc-stat"><div class="mtc-sv">${stats.won}</div><div class="mtc-sl">W</div></div>
+        <div class="mtc-stat"><div class="mtc-sv">${stats.draw}</div><div class="mtc-sl">D</div></div>
+        <div class="mtc-stat"><div class="mtc-sv">${stats.lost}</div><div class="mtc-sl">L</div></div>
+        <div class="mtc-stat mtc-pts"><div class="mtc-sv">${stats.points}</div><div class="mtc-sl">Pts</div></div>
       </div>
+
+      ${matchRows ? `<div class="mtc-matches">${matchRows}</div>` : ''}
+
     </div>`;
   }).join('');
 }
 
-// ── All Teams view ────────────────────────────────────────────────────────────
-function renderAllTeams(s) {
-  const grid = document.getElementById('all-teams-grid');
-  let teams = [...local.allTeams];
-
-  if (local.allTeamsGroupFilter !== 'ALL') teams = teams.filter(t => t.group === local.allTeamsGroupFilter);
-  if (local.allTeamsSearch) {
-    const q = local.allTeamsSearch.toLowerCase();
-    teams = teams.filter(t => t.name.toLowerCase().includes(q));
-  }
-
-  grid.innerHTML = teams.map(t => {
-    const ownerPlayer = s.players.find(p => p.teams.includes(t.id));
-    const isMine = ownerPlayer?.id === local.playerId;
-    const available = s.availableTeamIds.includes(t.id) && s.phase === 'draft';
-    return teamCardHTML(t, { showPickBtn: false, available, owner: ownerPlayer?.name || null, isMine });
-  }).join('');
+function toggleStars(teamId, btn) {
+  const el = document.getElementById(`mtstars-${teamId}`);
+  const open = el.classList.toggle('open');
+  btn.textContent = open ? '⭐ Star players ▴' : '⭐ Star players ▾';
 }
+window.toggleStars = toggleStars;
 
 // ── Standings view ────────────────────────────────────────────────────────────
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L'];
@@ -276,145 +345,127 @@ const STAGE_LABELS = {
 function renderStandings(s) {
   const medals = ['🥇','🥈','🥉'];
 
-  // ── Fantasy podiums ──────────────────────────────────────────────────────
-  const pp = document.getElementById('placement-podium');
-  if (!s.standings.placementPodium.length) {
-    pp.innerHTML = '<div class="podium-empty">Set after knockout stage completes.</div>';
-  } else {
-    pp.innerHTML = s.standings.placementPodium.map(row => {
-      const team = local.allTeams.find(t => t.id === row.teamId);
-      return `<div class="podium-row">
-        <div class="podium-medal">${medals[row.rank - 1] || row.rank}</div>
-        <div class="podium-info">
-          <div class="podium-owner">${row.owner}</div>
-          <div class="podium-team">${team?.flag || ''} ${team?.name || row.teamId}</div>
-        </div>
-      </div>`;
-    }).join('');
-  }
-
+  // ── Podium 2: Goal Difference ────────────────────────────────────────────
   const gp = document.getElementById('goals-podium');
   const hasGoals = s.standings.goalsPodium.some(r => r.goals > 0);
   if (!hasGoals) {
-    gp.innerHTML = '<div class="podium-empty">Goals appear once matches begin.</div>';
+    gp.innerHTML = '<div class="podium-empty">Appears once matches begin.</div>';
   } else {
     gp.innerHTML = s.standings.goalsPodium.map((row, i) => {
       const team = local.allTeams.find(t => t.id === row.teamId);
+      const net = row.netGoals ?? (row.goals - (row.conceded || 0));
+      const netStr = net >= 0 ? `+${net}` : `${net}`;
       return `<div class="podium-row">
         <div class="podium-medal">${medals[i]}</div>
         <div class="podium-info">
           <div class="podium-owner">${row.owner}</div>
-          <div class="podium-team">${team?.flag || ''} ${team?.name || row.teamId} · ${row.goals}g</div>
+          <div class="podium-team">${team?.flag || ''} ${team?.name || row.teamId}
+            <span class="podium-net ${net >= 0 ? 'pos' : 'neg'}">${netStr}</span>
+            <span class="podium-gd-detail">(${row.goals} scored – ${row.conceded ?? 0} conceded)</span>
+          </div>
         </div>
       </div>`;
     }).join('');
   }
 
-  // ── Group stage tables ───────────────────────────────────────────────────
+  // ── Group stage ──────────────────────────────────────────────────────────
   const gc = document.getElementById('group-stage-container');
   const hasApiStandings = Object.keys(s.groupStandings || {}).length > 0;
 
-  if (hasApiStandings) {
-    gc.innerHTML = GROUPS.map(g => {
-      const rows = s.groupStandings[g] || [];
-      if (!rows.length) return '';
-      return `<div class="group-block">
-        <div class="group-block-title">Group ${g}</div>
-        <table class="group-table">
-          <thead><tr>
-            <th class="gt-pos">#</th>
-            <th class="gt-team">Team</th>
-            <th>P</th><th>W</th><th>D</th><th>L</th>
-            <th>GF</th><th>GA</th><th>GD</th><th>Pts</th>
-          </tr></thead>
-          <tbody>${rows.map((r, i) => {
-            const team = local.allTeams.find(t => t.id === r.teamId);
-            const owner = s.players.find(p => p.teams.includes(r.teamId));
-            const isMine = owner?.id === local.playerId;
-            const advance = i < 2 ? 'gt-advance' : '';
-            return `<tr class="${advance}${isMine ? ' gt-mine' : ''}">
-              <td class="gt-pos">${i + 1}</td>
-              <td class="gt-team">${team?.flag || ''} ${team?.name || r.name}${isMine ? ' <span class="gt-owned">✓</span>' : ''}</td>
-              <td>${r.played}</td><td>${r.won}</td><td>${r.draw}</td><td>${r.lost}</td>
-              <td>${r.gf}</td><td>${r.ga}</td>
-              <td>${r.gd > 0 ? '+' : ''}${r.gd}</td>
-              <td class="gt-pts">${r.points}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
+  let groupsHtml = '';
+  for (const g of GROUPS) {
+    let rows;
+    if (hasApiStandings && s.groupStandings[g]?.length) {
+      rows = [...s.groupStandings[g]].sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf);
+    } else {
+      rows = local.allTeams.filter(t => t.group === g).map(t => ({
+        teamId: t.id, name: t.name, won: 0, draw: 0, lost: 0, points: 0, gd: 0, gf: 0,
+      }));
+    }
+    groupsHtml += `<div class="draft-group-section">
+      <div class="draft-group-title">Group ${g}</div>
+      <div class="sg-row sg-header">
+        <span class="sg-rank">#</span><span class="sg-name">Team</span>
+        <span class="sg-stat">W</span><span class="sg-stat">D</span><span class="sg-stat">L</span>
+        <span class="sg-pts">Pts</span>
       </div>`;
-    }).filter(Boolean).join('');
-  } else {
-    // Fallback: build groups from teams data
-    gc.innerHTML = GROUPS.map(g => {
-      const teams = local.allTeams.filter(t => t.group === g);
-      if (!teams.length) return '';
-      return `<div class="group-block">
-        <div class="group-block-title">Group ${g}</div>
-        <table class="group-table">
-          <thead><tr>
-            <th class="gt-pos">#</th>
-            <th class="gt-team">Team</th>
-            <th>P</th><th>Pts</th><th>GF</th>
-          </tr></thead>
-          <tbody>${teams.map((t, i) => {
-            const sc = s.scores[t.id] || {};
-            const owner = s.players.find(p => p.teams.includes(t.id));
-            const isMine = owner?.id === local.playerId;
-            return `<tr class="${isMine ? 'gt-mine' : ''}">
-              <td class="gt-pos">${i + 1}</td>
-              <td class="gt-team">${t.flag} ${t.name}${owner ? ` <span class="gt-owned">${isMine ? '✓' : owner.name}</span>` : ''}</td>
-              <td>–</td><td>–</td><td>${sc.goals || 0}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
+    rows.forEach((r, i) => {
+      const team = local.allTeams.find(t => t.id === r.teamId);
+      const owner = s.players.find(p => p.teams.includes(r.teamId));
+      const isMine = owner?.id === local.playerId;
+      groupsHtml += `<div class="sg-row${isMine ? ' sg-mine' : ''}${i < 2 ? ' sg-advance' : ''}">
+        <span class="sg-rank">${i + 1}</span>
+        <span class="sg-name">${team?.flag || ''} ${team?.name || r.name}</span>
+        <span class="sg-stat">${r.won || 0}</span>
+        <span class="sg-stat">${r.draw || 0}</span>
+        <span class="sg-stat">${r.lost || 0}</span>
+        <span class="sg-pts">${r.points || 0}</span>
       </div>`;
-    }).filter(Boolean).join('');
+    });
+    groupsHtml += '</div>';
   }
+  gc.innerHTML = `<div class="draft-groups-grid">${groupsHtml}</div>`;
 
-  // ── Knockout bracket ─────────────────────────────────────────────────────
+  // ── Knockout bracket (left → Final ← right) ───────────────────────────────
   const bc = document.getElementById('bracket-container');
   const bracket = s.bracket || {};
-  const knockoutStages = ['ROUND_OF_32','ROUND_OF_16','QUARTER_FINALS','SEMI_FINALS','FINAL'];
-  const hasKnockout = knockoutStages.some(st => (bracket[st] || []).length > 0);
+  const STAGE_COUNTS = { ROUND_OF_32: 16, ROUND_OF_16: 8, QUARTER_FINALS: 4, SEMI_FINALS: 2 };
+  const LEFT_STAGES = ['ROUND_OF_32', 'ROUND_OF_16', 'QUARTER_FINALS', 'SEMI_FINALS'];
 
-  if (!hasKnockout) {
-    bc.innerHTML = '<div class="bracket-empty">Knockout bracket appears after group stage completes.</div>';
-    return;
+  function getSlots(stage) {
+    const matches = bracket[stage] || [];
+    const total = STAGE_COUNTS[stage];
+    return Array.from({ length: total }, (_, i) => matches[i] || null);
   }
 
-  bc.innerHTML = knockoutStages.map(stage => {
-    const matches = bracket[stage] || [];
-    if (!matches.length) return '';
-    return `<div class="bracket-stage">
-      <div class="bracket-stage-title">${STAGE_LABELS[stage] || stage}</div>
-      <div class="bracket-matches">
-        ${matches.map(m => {
-          const ht = local.allTeams.find(t => t.id === m.home);
-          const at = local.allTeams.find(t => t.id === m.away);
-          const hName = ht?.name || m.homeName || m.home;
-          const aName = at?.name || m.awayName || m.away;
-          const hFlag = ht?.flag || '';
-          const aFlag = at?.flag || '';
-          const finished = m.status === 'FINISHED';
-          const live = m.status === 'IN_PLAY' || m.status === 'PAUSED';
-          const hOwner = s.players.find(p => p.teams.includes(m.home));
-          const aOwner = s.players.find(p => p.teams.includes(m.away));
-          return `<div class="bracket-match ${live ? 'bm-live' : ''}">
-            <div class="bm-team ${hOwner?.id === local.playerId ? 'bm-mine' : ''} ${finished && m.homeGoals > m.awayGoals ? 'bm-winner' : ''}">
-              <span>${hFlag} ${hName}</span>
-              ${finished || live ? `<span class="bm-score">${m.homeGoals ?? '–'}</span>` : ''}
-            </div>
-            <div class="bm-team ${aOwner?.id === local.playerId ? 'bm-mine' : ''} ${finished && m.awayGoals > m.homeGoals ? 'bm-winner' : ''}">
-              <span>${aFlag} ${aName}</span>
-              ${finished || live ? `<span class="bm-score">${m.awayGoals ?? '–'}</span>` : ''}
-            </div>
-            ${live ? '<div class="bm-live-badge">LIVE</div>' : ''}
-          </div>`;
-        }).join('')}
-      </div>
+  function matchCard(m) {
+    if (!m || (m.home === 'TBD' && m.away === 'TBD')) return `<div class="bt-match bt-tbd">
+      <div class="bt-team"><span>TBD</span></div><div class="bt-team"><span>TBD</span></div>
     </div>`;
-  }).filter(Boolean).join('');
+    const ht = m.home !== 'TBD' ? local.allTeams.find(t => t.id === m.home) : null;
+    const at = m.away !== 'TBD' ? local.allTeams.find(t => t.id === m.away) : null;
+    const finished = m.status === 'FINISHED';
+    const live = m.status === 'IN_PLAY' || m.status === 'PAUSED';
+    const hWin = finished && m.homeGoals > m.awayGoals;
+    const aWin = finished && m.awayGoals > m.homeGoals;
+    const hOwner = s.players.find(p => p.teams.includes(m.home));
+    const aOwner = s.players.find(p => p.teams.includes(m.away));
+    return `<div class="bt-match${live ? ' bt-live' : ''}">
+      <div class="bt-team${hOwner?.id === local.playerId ? ' bt-mine' : ''}${hWin ? ' bt-winner' : ''}">
+        <span>${ht?.flag || ''} ${ht?.name || m.homeName || 'TBD'}</span>
+        ${finished || live ? `<span class="bt-score">${m.homeGoals ?? '–'}</span>` : ''}
+      </div>
+      <div class="bt-team${aOwner?.id === local.playerId ? ' bt-mine' : ''}${aWin ? ' bt-winner' : ''}">
+        <span>${at?.flag || ''} ${at?.name || m.awayName || 'TBD'}</span>
+        ${finished || live ? `<span class="bt-score">${m.awayGoals ?? '–'}</span>` : ''}
+      </div>
+      ${live ? '<div class="bt-live-badge">LIVE</div>' : ''}
+    </div>`;
+  }
+
+  function stageCol(label, slots) {
+    return `<div class="bt-col">
+      <div class="bt-col-label">${label}</div>
+      <div class="bt-col-matches">${slots.map(m => matchCard(m)).join('')}</div>
+    </div>`;
+  }
+
+  let bracketHtml = '<div class="bracket-tree">';
+  for (const stage of LEFT_STAGES) {
+    const slots = getSlots(stage);
+    bracketHtml += stageCol(STAGE_LABELS[stage], slots.slice(0, slots.length / 2));
+  }
+  const finalMatch = (bracket['FINAL'] || [])[0] || null;
+  bracketHtml += `<div class="bt-col bt-final-col">
+    <div class="bt-col-label">Final</div>
+    <div class="bt-col-matches bt-final-matches">${matchCard(finalMatch)}</div>
+  </div>`;
+  for (let i = LEFT_STAGES.length - 1; i >= 0; i--) {
+    const slots = getSlots(LEFT_STAGES[i]);
+    bracketHtml += stageCol(STAGE_LABELS[LEFT_STAGES[i]], slots.slice(slots.length / 2));
+  }
+  bracketHtml += '</div>';
+  bc.innerHTML = bracketHtml;
 }
 
 // ── Admin score modal ─────────────────────────────────────────────────────────
@@ -430,7 +481,8 @@ function renderAdminModal(s) {
     return `<div class="admin-row">
       <span>${team.flag}</span>
       <span style="font-size:13px">${team.name}</span>
-      <input type="number" min="0" placeholder="Goals" value="${row.goals}" id="admin-goals-${row.id}">
+      <input type="number" min="0" placeholder="Scored" value="${row.goals}" id="admin-goals-${row.id}">
+      <input type="number" min="0" placeholder="Conceded" value="${row.conceded || 0}" id="admin-conceded-${row.id}">
       <input type="number" min="1" max="4" placeholder="Place" value="${row.placement || ''}" id="admin-place-${row.id}">
       <button class="admin-save-btn" onclick="saveScore('${row.id}')">Save</button>
     </div>`;
@@ -440,10 +492,11 @@ function renderAdminModal(s) {
 async function saveScore(teamId) {
   const key = document.getElementById('admin-key-input').value;
   const goals = document.getElementById(`admin-goals-${teamId}`).value;
+  const conceded = document.getElementById(`admin-conceded-${teamId}`).value;
   const placement = document.getElementById(`admin-place-${teamId}`).value;
   await api('/api/scores', {
     method: 'POST',
-    body: { adminKey: key, teamId, goals: parseInt(goals) || 0, placement: placement ? parseInt(placement) : null }
+    body: { adminKey: key, teamId, goals: parseInt(goals) || 0, conceded: parseInt(conceded) || 0, placement: placement ? parseInt(placement) : null }
   });
   await poll();
 }
@@ -502,6 +555,7 @@ const JERSEY_NUMS = {
   FW: [7, 9, 11, 21, 22, 25],
 };
 const POS_COLORS = { GK: '#b45309', DF: '#1d4ed8', MF: '#15803d', FW: '#b91c1c' };
+const POS_FULL = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
 
 function assignJerseyNumbers(roster) {
   const counters = { GK: 0, DF: 0, MF: 0, FW: 0 };
@@ -585,17 +639,17 @@ function openTeamModal(teamId) {
     <div class="stars-section">
       <div class="section-label">⭐ Star Players</div>
       <div class="stars-cards">
-        ${stars.map(p => `
+        ${stars.map((p, i) => `
           <div class="star-card">
-            <div class="star-avatar" style="background:${POS_COLORS[p.pos] || '#374151'}">
-              <span class="star-init">${playerInitials(p.name)}</span>
-              <span class="star-num">#${p.number}</span>
+            <div class="star-avatar" id="star-av-${teamId}-${i}" style="background:${POS_COLORS[p.pos] || '#374151'}">
+              <span class="star-init" id="star-init-${teamId}-${i}">${playerInitials(p.name)}</span>
             </div>
             <div class="star-name">${p.name}</div>
             <div class="star-meta">
-              <span class="pos-badge ${p.pos}">${p.pos}</span>
-              <span class="star-val">$${playerValue(p)}M</span>
+              <span class="pos-badge ${p.pos}" title="${POS_FULL[p.pos] || p.pos}">${p.pos}</span>
+              <span class="star-num-badge">#${p.number}</span>
             </div>
+            <div class="star-bio" id="star-bio-${teamId}-${i}"></div>
           </div>`).join('')}
       </div>
     </div>
@@ -614,6 +668,25 @@ function openTeamModal(teamId) {
     </div>
   `;
   document.getElementById('team-modal').classList.remove('hidden');
+
+  // Fetch star player photos + bios asynchronously
+  stars.forEach(async (p, i) => {
+    const el = document.getElementById(`star-av-${teamId}-${i}`);
+    const bioEl = document.getElementById(`star-bio-${teamId}-${i}`);
+
+    const [photoRes, bioRes] = await Promise.all([
+      api(`/api/player-photo?name=${encodeURIComponent(p.name)}`),
+      api(`/api/player-bio?name=${encodeURIComponent(p.name)}`),
+    ]);
+
+    if (photoRes?.url && el) {
+      el.style.background = `url(${photoRes.url}) center top / cover`;
+      document.getElementById(`star-init-${teamId}-${i}`)?.remove();
+    }
+    if (bioRes?.bio && bioEl) {
+      bioEl.textContent = bioRes.bio;
+    }
+  });
 }
 window.openTeamModal = openTeamModal;
 
@@ -685,36 +758,10 @@ function bindStaticEvents() {
     else alert(res?.error || 'Setup failed');
   });
 
-  // Draft group filter chips
-  document.querySelectorAll('#draft-view .chip[data-group]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#draft-view .chip[data-group]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      local.draftGroupFilter = btn.dataset.group;
-      renderAvailableTeams(local.server);
-    });
-  });
-
   // Draft search
   document.getElementById('draft-search').addEventListener('input', e => {
     local.draftSearch = e.target.value;
     renderAvailableTeams(local.server);
-  });
-
-  // All teams group filter
-  document.querySelectorAll('.chip[data-group2]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.chip[data-group2]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      local.allTeamsGroupFilter = btn.dataset.group2;
-      renderAllTeams(local.server);
-    });
-  });
-
-  // All teams search
-  document.getElementById('all-teams-search').addEventListener('input', e => {
-    local.allTeamsSearch = e.target.value;
-    renderAllTeams(local.server);
   });
 
   // Change identity
@@ -830,6 +877,32 @@ async function makePick(teamId) {
 }
 window.makePick = makePick;
 
+// ── Waiver wire actions ───────────────────────────────────────────────────────
+function selectWaiverPickup(teamId) {
+  local.waiverPickup = teamId;
+  renderAvailableTeams(local.server);
+}
+function cancelWaiver() {
+  local.waiverPickup = null;
+  renderAvailableTeams(local.server);
+}
+async function confirmWaiverDrop(dropTeamId) {
+  if (!local.playerId || !local.waiverPickup) return;
+  const pickup = local.allTeams.find(t => t.id === local.waiverPickup);
+  const drop = local.allTeams.find(t => t.id === dropTeamId);
+  if (!confirm(`Pick up ${pickup?.flag || ''} ${pickup?.name}?\nYou'll drop ${drop?.flag || ''} ${drop?.name}.`)) return;
+  const res = await api('/api/waiver/pickup', {
+    method: 'POST',
+    body: { playerId: local.playerId, pickupTeamId: local.waiverPickup, dropTeamId }
+  });
+  local.waiverPickup = null;
+  if (res?.success) await poll();
+  else alert(res?.error || 'Waiver pickup failed');
+}
+window.selectWaiverPickup = selectWaiverPickup;
+window.cancelWaiver = cancelWaiver;
+window.confirmWaiverDrop = confirmWaiverDrop;
+
 // ── Trade actions ─────────────────────────────────────────────────────────────
 async function respondTrade(tradeId, accept) {
   const res = await api('/api/trade/respond', {
@@ -883,7 +956,6 @@ function showView(name) {
   if (local.server) {
     if (name === 'draft') renderDraft(local.server);
     if (name === 'my-teams') renderMyTeams(local.server);
-    if (name === 'all-teams') renderAllTeams(local.server);
     if (name === 'standings') renderStandings(local.server);
     if (name === 'trades') renderTrades(local.server);
   }

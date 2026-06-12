@@ -71,8 +71,7 @@
   <nav id="main-nav" class="hidden">
     <button class="tab-btn active" data-view="draft">Draft</button>
     <button class="tab-btn" data-view="my-teams">My Teams</button>
-    <button class="tab-btn" data-view="all-teams">All Teams</button>
-    <button class="tab-btn" data-view="standings">Standings</button>
+<button class="tab-btn" data-view="standings">Standings</button>
     <button class="tab-btn" data-view="trades">Trades <span id="trade-badge" class="badge hidden">0</span></button>
   </nav>
   <div class="header-right">
@@ -124,23 +123,8 @@
       <div class="draft-main">
         <div class="filter-bar">
           <input id="draft-search" class="text-input search" type="text" placeholder="🔍 Search teams…">
-          <div class="filter-chips">
-            <button class="chip active" data-group="ALL">All</button>
-            <button class="chip" data-group="A">A</button>
-            <button class="chip" data-group="B">B</button>
-            <button class="chip" data-group="C">C</button>
-            <button class="chip" data-group="D">D</button>
-            <button class="chip" data-group="E">E</button>
-            <button class="chip" data-group="F">F</button>
-            <button class="chip" data-group="G">G</button>
-            <button class="chip" data-group="H">H</button>
-            <button class="chip" data-group="I">I</button>
-            <button class="chip" data-group="J">J</button>
-            <button class="chip" data-group="K">K</button>
-            <button class="chip" data-group="L">L</button>
-          </div>
         </div>
-        <div id="available-teams-grid" class="teams-grid"></div>
+        <div id="available-teams-grid"></div>
       </div>
     </div>
   </div>
@@ -151,33 +135,7 @@
       <h2>My Teams</h2>
       <p id="my-teams-subtext" class="sub"></p>
     </div>
-    <div id="my-teams-grid" class="teams-grid"></div>
-  </div>
-
-  <!-- All Teams view -->
-  <div id="all-teams-view" class="view hidden">
-    <div class="view-header">
-      <h2>All 48 Teams</h2>
-      <div class="filter-bar">
-        <input id="all-teams-search" class="text-input search" type="text" placeholder="🔍 Search…">
-        <div class="filter-chips">
-          <button class="chip active" data-group2="ALL">All</button>
-          <button class="chip" data-group2="A">A</button>
-          <button class="chip" data-group2="B">B</button>
-          <button class="chip" data-group2="C">C</button>
-          <button class="chip" data-group2="D">D</button>
-          <button class="chip" data-group2="E">E</button>
-          <button class="chip" data-group2="F">F</button>
-          <button class="chip" data-group2="G">G</button>
-          <button class="chip" data-group2="H">H</button>
-          <button class="chip" data-group2="I">I</button>
-          <button class="chip" data-group2="J">J</button>
-          <button class="chip" data-group2="K">K</button>
-          <button class="chip" data-group2="L">L</button>
-        </div>
-      </div>
-    </div>
-    <div id="all-teams-grid" class="teams-grid"></div>
+    <div id="my-teams-grid" class="my-teams-grid"></div>
   </div>
 
   <!-- Standings view -->
@@ -187,23 +145,22 @@
       <button id="open-admin-btn" class="btn-ghost small">🔧 Update Scores</button>
       <button id="sync-scores-btn" class="btn-ghost small hidden">🔄 Sync Live Scores</button>
     </div>
-    <div class="podiums-row">
-      <div class="podium-card">
-        <h3>🏆 Tournament Placement</h3>
-        <p class="podium-desc">Who owns the teams that finish 1st · 2nd · 3rd?</p>
-        <div id="placement-podium"></div>
-      </div>
-      <div class="podium-card">
-        <h3>⚽ Most Goals Scored</h3>
-        <p class="podium-desc">Who owns the top goal-scoring teams?</p>
-        <div id="goals-podium"></div>
-      </div>
-    </div>
     <div class="section-title">Group Stage</div>
-    <div id="group-stage-container" class="group-stage-grid"></div>
+    <div id="group-stage-container"></div>
 
-    <div class="section-title" style="margin-top:28px">Knockout Bracket</div>
-    <div id="bracket-container" class="bracket-wrap"></div>
+    <div class="podium-label" style="margin-top:32px">
+      <span class="podium-num">Podium 1</span>
+      <h2 class="podium-heading">🏆 Knockout Bracket</h2>
+      <p class="podium-desc">Who owns the teams that advance furthest in the tournament?</p>
+    </div>
+    <div id="bracket-container"></div>
+
+    <div class="podium-label" style="margin-top:36px">
+      <span class="podium-num">Podium 2</span>
+      <h2 class="podium-heading">⚽ Goal Difference</h2>
+      <p class="podium-desc">Who owns the teams with the best goals scored minus goals conceded?</p>
+    </div>
+    <div id="goals-podium" class="goals-podium-list"></div>
   </div>
 
   <!-- Trades view -->

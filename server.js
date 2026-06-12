@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const os = require('os');
@@ -18,6 +19,75 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'worldcup2026';
 const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+
+// ── Player photo cache + lookup ───────────────────────────────────────────────
+const fs = require('fs');
+const PHOTO_CACHE_FILE = path.join(__dirname, 'data', 'photo-cache.json');
+
+// Load persisted cache
+let photoCacheData = {};
+try { photoCacheData = JSON.parse(fs.readFileSync(PHOTO_CACHE_FILE, 'utf8')); } catch {}
+const photoCache = new Map(Object.entries(photoCacheData));
+
+function savePhotoCache() {
+  fs.writeFileSync(PHOTO_CACHE_FILE, JSON.stringify(Object.fromEntries(photoCache)));
+}
+
+// ── Player bio cache ──────────────────────────────────────────────────────────
+const BIO_CACHE_FILE = path.join(__dirname, 'data', 'bio-cache.json');
+let bioCacheData = {};
+try { bioCacheData = JSON.parse(fs.readFileSync(BIO_CACHE_FILE, 'utf8')); } catch {}
+const bioCache = new Map(Object.entries(bioCacheData));
+function saveBioCache() {
+  fs.writeFileSync(BIO_CACHE_FILE, JSON.stringify(Object.fromEntries(bioCache)));
+}
+
+// Groq throttle: max 5 calls/min from this app (leaves room for other projects)
+let groqCallsThisMinute = 0;
+setInterval(() => { groqCallsThisMinute = 0; }, 60_000);
+
+async function fetchPlayerPhoto(name) {
+  if (photoCache.has(name)) return photoCache.get(name);
+
+  async function tryWikipedia(title) {
+    try {
+      const slug = encodeURIComponent(title.replace(/ /g, '_'));
+      const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${slug}`);
+      if (!r.ok) return null;
+      const d = await r.json();
+      return d.thumbnail?.source || null;
+    } catch { return null; }
+  }
+
+  // 1. Try Wikipedia directly
+  let url = await tryWikipedia(name);
+
+  // 2. Fallback to Groq for name disambiguation (max 5 calls/min)
+  if (!url && GROQ_API_KEY && groqCallsThisMinute < 5) {
+    groqCallsThisMinute++;
+    try {
+      const gr = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [{ role: 'user', content: `Reply with ONLY the exact Wikipedia article title for the footballer named "${name}". Nothing else.` }],
+          max_tokens: 20, temperature: 0,
+        }),
+      });
+      if (gr.ok) {
+        const gd = await gr.json();
+        const title = gd.choices?.[0]?.message?.content?.trim().replace(/^["']|["']$/g, '');
+        if (title && title !== name) url = await tryWikipedia(title);
+      }
+    } catch {}
+  }
+
+  photoCache.set(name, url);
+  savePhotoCache();
+  return url;
+}
 
 // ── In-memory game state ─────────────────────────────────────────────────────
 
@@ -36,7 +106,7 @@ let state = {
   apiEnabled: !!FOOTBALL_API_KEY,
 };
 
-TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, placement: null }; });
+TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, conceded: 0, placement: null }; });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,23 +126,24 @@ function currentPicker() {
 
 function findTeam(apiTeam) {
   if (!apiTeam) return null;
-  return TEAMS.find(t =>
-    t.id === apiTeam.tla ||
-    t.name === apiTeam.name ||
-    t.name.toLowerCase().startsWith((apiTeam.name || '').toLowerCase().split(' ')[0])
-  ) || null;
+  const tla = (apiTeam.tla || '').toUpperCase();
+  const name = (apiTeam.name || '').toLowerCase();
+  return TEAMS.find(t => t.id === tla) ||
+    TEAMS.find(t => t.name.toLowerCase() === name) ||
+    TEAMS.find(t => name && t.name.toLowerCase().includes(name) || (name && name.includes(t.name.toLowerCase()))) ||
+    null;
 }
 
 // ── Standings / podiums (fantasy) ────────────────────────────────────────────
 
 function computeStandings() {
   const teamsByGoals = Object.entries(state.scores)
-    .map(([id, s]) => ({ id, goals: s.goals, placement: s.placement }))
-    .sort((a, b) => b.goals - a.goals || a.id.localeCompare(b.id));
+    .map(([id, s]) => ({ id, goals: s.goals, conceded: s.conceded || 0, netGoals: s.goals - (s.conceded || 0), placement: s.placement }))
+    .sort((a, b) => b.netGoals - a.netGoals || b.goals - a.goals || a.id.localeCompare(b.id));
 
   const goalsPodium = teamsByGoals.slice(0, 3).map((t, i) => {
     const owner = state.players.find(p => p.teams.includes(t.id));
-    return { rank: i + 1, teamId: t.id, goals: t.goals, owner: owner?.name || '(undrafted)' };
+    return { rank: i + 1, teamId: t.id, goals: t.goals, conceded: t.conceded, netGoals: t.netGoals, owner: owner?.name || '(undrafted)' };
   });
 
   const placedTeams = Object.entries(state.scores)
@@ -104,15 +175,19 @@ async function doSync() {
     if (mr.ok) {
       const md = await mr.json();
       // Reset goals
-      TEAMS.forEach(t => { state.scores[t.id].goals = 0; });
+      TEAMS.forEach(t => { state.scores[t.id].goals = 0; state.scores[t.id].conceded = 0; });
 
+      const STAGE_NORM = { LAST_32: 'ROUND_OF_32', LAST_16: 'ROUND_OF_16' };
       const byStage = {};
       for (const m of md.matches || []) {
-        const stage = m.stage || 'UNKNOWN';
+        const stage = STAGE_NORM[m.stage] || m.stage || 'UNKNOWN';
         if (!byStage[stage]) byStage[stage] = [];
 
-        const home = findTeam(m.homeTeam);
-        const away = findTeam(m.awayTeam);
+        // Don't resolve TBD placeholder teams (API uses a real team's tla as placeholder)
+        const homeTBD = !m.homeTeam?.name || m.homeTeam.name === 'TBD';
+        const awayTBD = !m.awayTeam?.name || m.awayTeam.name === 'TBD';
+        const home = homeTBD ? null : findTeam(m.homeTeam);
+        const away = awayTBD ? null : findTeam(m.awayTeam);
         const hg = m.score?.fullTime?.home ?? m.score?.halfTime?.home ?? null;
         const ag = m.score?.fullTime?.away ?? m.score?.halfTime?.away ?? null;
 
@@ -120,13 +195,15 @@ async function doSync() {
         if (['FINISHED', 'IN_PLAY', 'PAUSED'].includes(m.status)) {
           if (home && hg !== null) state.scores[home.id].goals += hg;
           if (away && ag !== null) state.scores[away.id].goals += ag;
+          if (home && ag !== null) state.scores[home.id].conceded += ag;
+          if (away && hg !== null) state.scores[away.id].conceded += hg;
         }
 
         byStage[stage].push({
-          home: home?.id || m.homeTeam?.tla || 'TBD',
-          homeName: m.homeTeam?.name || 'TBD',
-          away: away?.id || m.awayTeam?.tla || 'TBD',
-          awayName: m.awayTeam?.name || 'TBD',
+          home: home?.id || 'TBD',
+          homeName: homeTBD ? 'TBD' : (m.homeTeam?.name || 'TBD'),
+          away: away?.id || 'TBD',
+          awayName: awayTBD ? 'TBD' : (m.awayTeam?.name || 'TBD'),
           homeGoals: hg,
           awayGoals: ag,
           status: m.status,
@@ -205,7 +282,7 @@ app.post('/api/setup', (req, res) => {
   state.pickIndex = 0;
   state.availableTeamIds = TEAMS.map(t => t.id);
   state.trades = [];
-  TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, placement: null }; });
+  TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, conceded: 0, placement: null }; });
   state.phase = 'draft';
 
   console.log(`Game started: ${state.players.length} players, ${state.teamsPerPlayer} picks each`);
@@ -231,6 +308,24 @@ app.post('/api/draft/pick', (req, res) => {
   }
 
   res.json({ success: true, phase: state.phase });
+});
+
+app.post('/api/waiver/pickup', (req, res) => {
+  const { playerId, pickupTeamId, dropTeamId } = req.body;
+  if (state.phase !== 'active') return res.status(400).json({ error: 'Waiver pickups only available after draft' });
+
+  const player = state.players.find(p => p.id === playerId);
+  if (!player) return res.status(403).json({ error: 'Unknown player' });
+  if (!state.availableTeamIds.includes(pickupTeamId)) return res.status(400).json({ error: 'Team not available' });
+  if (!player.teams.includes(dropTeamId)) return res.status(400).json({ error: "You don't own that team" });
+
+  player.teams = player.teams.filter(id => id !== dropTeamId);
+  state.availableTeamIds = state.availableTeamIds.filter(id => id !== pickupTeamId);
+  player.teams.push(pickupTeamId);
+  state.availableTeamIds.push(dropTeamId);
+
+  console.log(`Waiver: ${player.name} dropped ${dropTeamId}, picked up ${pickupTeamId}`);
+  res.json({ success: true });
 });
 
 app.post('/api/trade/propose', (req, res) => {
@@ -285,10 +380,11 @@ app.post('/api/trade/cancel', (req, res) => {
 });
 
 app.post('/api/scores', (req, res) => {
-  const { adminKey, teamId, goals, placement } = req.body;
+  const { adminKey, teamId, goals, conceded, placement } = req.body;
   if (adminKey !== ADMIN_KEY) return res.status(403).json({ error: 'Bad admin key' });
   if (!state.scores[teamId]) return res.status(404).json({ error: 'Unknown team' });
   if (goals !== undefined) state.scores[teamId].goals = parseInt(goals, 10) || 0;
+  if (conceded !== undefined) state.scores[teamId].conceded = parseInt(conceded, 10) || 0;
   if (placement !== undefined) state.scores[teamId].placement = placement ? parseInt(placement, 10) : null;
   res.json({ success: true });
 });
@@ -304,6 +400,44 @@ app.post('/api/sync-scores', async (req, res) => {
   }
 });
 
+app.get('/api/player-photo', async (req, res) => {
+  const { name } = req.query;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const url = await fetchPlayerPhoto(name);
+  res.json({ url: url || null });
+});
+
+app.get('/api/player-bio', async (req, res) => {
+  const { name } = req.query;
+  if (!name) return res.status(400).json({ error: 'name required' });
+
+  if (bioCache.has(name)) return res.json({ bio: bioCache.get(name) });
+  if (!GROQ_API_KEY || groqCallsThisMinute >= 5) return res.json({ bio: null });
+
+  groqCallsThisMinute++;
+  try {
+    const gr = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: `In 12 words or fewer, describe what ${name} is best known for as a footballer. No filler, no name repetition.` }],
+        max_tokens: 25, temperature: 0.3,
+      }),
+    });
+    if (gr.ok) {
+      const gd = await gr.json();
+      const bio = gd.choices?.[0]?.message?.content?.trim().replace(/^["']|["']$/g, '') || null;
+      bioCache.set(name, bio);
+      saveBioCache();
+      return res.json({ bio });
+    }
+  } catch {}
+  bioCache.set(name, null);
+  saveBioCache();
+  res.json({ bio: null });
+});
+
 app.post('/api/reset', (req, res) => {
   const { adminKey } = req.body;
   if (adminKey !== ADMIN_KEY) return res.status(403).json({ error: 'Bad admin key' });
@@ -315,7 +449,7 @@ app.post('/api/reset', (req, res) => {
   state.trades = [];
   state.groupStandings = {};
   state.bracket = {};
-  TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, placement: null }; });
+  TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, conceded: 0, placement: null }; });
   console.log('Game reset');
   res.json({ success: true });
 });
