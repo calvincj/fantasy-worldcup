@@ -394,7 +394,8 @@ app.post('/api/sync-scores', async (req, res) => {
   state.lastApiSync = 0; // force bypass rate limit
   try {
     await doSync();
-    res.json({ success: true });
+    const matchesSynced = Object.values(state.bracket).flat().length;
+    res.json({ success: true, matchesSynced });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
