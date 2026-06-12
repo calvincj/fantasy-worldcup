@@ -686,13 +686,12 @@ const POS_FULL = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forw
 
 function assignJerseyNumbers(roster) {
   const assigned = new Set();
-  // First pass: assign known numbers
+  // First pass: use numbers already in the data
   const withKnown = roster.map(p => {
-    const known = KNOWN_NUMBERS[p.name];
-    if (known) { assigned.add(known); return { ...p, number: known }; }
+    if (p.number) { assigned.add(p.number); return p; }
     return { ...p, number: null };
   });
-  // Second pass: fill in the rest sequentially, skipping taken numbers
+  // Second pass: fill remaining sequentially, skipping taken numbers
   const counters = { GK: 0, DF: 0, MF: 0, FW: 0 };
   return withKnown.map(p => {
     if (p.number !== null) return p;
