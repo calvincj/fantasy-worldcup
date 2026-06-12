@@ -337,6 +337,7 @@ function renderMyTeams(s) {
         <div class="mtc-stat"><div class="mtc-sv">${stats.draw}</div><div class="mtc-sl">D</div></div>
         <div class="mtc-stat"><div class="mtc-sv">${stats.lost}</div><div class="mtc-sl">L</div></div>
         <div class="mtc-stat mtc-pts"><div class="mtc-sv">${stats.points}</div><div class="mtc-sl">Pts</div></div>
+        ${(() => { const gd = (score.goals||0)-(score.conceded||0); const gdStr = gd>0?`+${gd}`:`${gd}`; return `<div class="mtc-stat mtc-gd"><div class="mtc-sv ${gd>0?'mtc-pos':gd<0?'mtc-neg':''}">${gdStr}</div><div class="mtc-sl">GD</div></div>`; })()}
       </div>
 
       ${matchRows ? `<div class="mtc-matches">${matchRows}</div>` : ''}
@@ -414,8 +415,8 @@ function renderStandings(s) {
       <div class="draft-group-title">Group ${g}</div>
       <div class="sg-row sg-header">
         <span class="sg-rank">#</span><span class="sg-name">Team</span>
-        <span class="sg-stat">W</span><span class="sg-stat">D</span><span class="sg-stat">L</span>
-        <span class="sg-pts">Pts</span>
+        <div class="sg-stats"><span class="sg-stat">W</span><span class="sg-stat">D</span><span class="sg-stat">L</span>
+        <span class="sg-pts">Pts</span></div>
       </div>`;
     rows.forEach((r, i) => {
       const team = local.allTeams.find(t => t.id === r.teamId);
@@ -424,10 +425,8 @@ function renderStandings(s) {
       groupsHtml += `<div class="sg-row${isMine ? ' sg-mine' : ''}${i < 2 ? ' sg-advance' : ''}">
         <span class="sg-rank">${i + 1}</span>
         <span class="sg-name">${team?.flag || ''} ${team?.name || r.name}</span>
-        <span class="sg-stat">${r.won || 0}</span>
-        <span class="sg-stat">${r.draw || 0}</span>
-        <span class="sg-stat">${r.lost || 0}</span>
-        <span class="sg-pts">${r.points || 0}</span>
+        <div class="sg-stats"><span class="sg-stat">${r.won || 0}</span><span class="sg-stat">${r.draw || 0}</span><span class="sg-stat">${r.lost || 0}</span>
+        <span class="sg-pts">${r.points || 0}</span></div>
       </div>`;
     });
     groupsHtml += '</div>';

@@ -306,7 +306,6 @@ app.post('/api/draft/pick', (req, res) => {
   const team = TEAMS.find(t => t.id === teamId);
   picker.teams.push(teamId);
   state.availableTeamIds = state.availableTeamIds.filter(id => id !== teamId);
-  state.activityLog.unshift({ type: 'draft', text: `${picker.name} drafted ${team?.flag || ''} ${team?.name || teamId}`, ts: Date.now() });
   state.pickIndex++;
 
   if (state.pickIndex >= state.draftOrder.length) {
