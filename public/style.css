@@ -292,6 +292,24 @@ h1, h2, h3, h4,
 .pick-player { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pick-team { color: var(--sub); font-size: 13px; }
 
+/* ── Post-draft sidebar: rosters + activity ─────────────────────────── */
+.sidebar-section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--sub); padding: 4px 0 6px; }
+
+.roster-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.roster-row:last-of-type { border-bottom: none; }
+.roster-num { font-size: 13px; font-weight: 700; width: 20px; flex-shrink: 0; padding-top: 2px; }
+.roster-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.roster-teams { display: flex; flex-direction: column; gap: 2px; }
+.roster-team { font-size: 12px; color: var(--sub); }
+
+.act-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.act-row:last-child { border-bottom: none; }
+.act-icon { font-size: 14px; flex-shrink: 0; padding-top: 1px; }
+.act-text { font-size: 12px; color: var(--text); line-height: 1.4; }
+.act-time { font-size: 11px; color: var(--sub); margin-top: 2px; }
+.act-row.act-system .act-text { color: var(--green); font-weight: 600; }
+.act-empty { font-size: 12px; color: var(--sub); padding: 8px 0; }
+
 /* ── Filter bar ────────────────────────────────────────────────────────── */
 .filter-bar {
   display: flex;
@@ -556,22 +574,30 @@ h1, h2, h3, h4,
 
 .podium-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
-  padding: 10px;
+  padding: 12px;
   border-radius: var(--radius-sm);
   margin-bottom: 8px;
   background: var(--surface2);
 }
-.podium-medal { font-size: 24px; width: 36px; text-align: center; flex-shrink: 0; }
-.podium-info { flex: 1; }
+.podium-medal { font-size: 24px; width: 36px; text-align: center; flex-shrink: 0; padding-top: 2px; }
+.podium-info { flex: 1; min-width: 0; }
+.podium-owner-row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .podium-owner { font-weight: 700; font-size: 15px; }
 .podium-team { color: var(--sub); font-size: 13px; }
 .podium-empty { color: var(--sub); font-style: italic; text-align: center; padding: 16px; }
-.podium-net { font-weight: 700; margin-left: 6px; }
+.podium-net { font-weight: 700; }
 .podium-net.pos { color: var(--green); }
 .podium-net.neg { color: var(--danger); }
-.podium-gd-detail { color: var(--sub); font-size: 12px; margin-left: 4px; }
+.podium-gd-detail { color: var(--sub); font-size: 12px; }
+.gd-breakdown { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--border); padding-top: 6px; }
+.gd-team-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); }
+.gd-team-row > span:first-child { flex: 1; }
+.gd-team-net { font-weight: 700; font-size: 12px; }
+.gd-team-net.pos { color: var(--green); }
+.gd-team-net.neg { color: var(--danger); }
+.gd-team-detail { color: var(--sub); font-size: 11px; }
 
 .goals-table-section h3 { margin-bottom: 14px; font-size: 18px; }
 

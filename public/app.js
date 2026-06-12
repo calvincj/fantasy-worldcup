@@ -128,31 +128,49 @@ function renderDraft(s) {
 
 function renderDraftBoard(s) {
   const list = document.getElementById('draft-board-list');
-  const rows = [];
 
-  for (let i = 0; i < s.totalPicks; i++) {
-    const pick = s.players.length > 0 ? s.players[s.players.indexOf(
-      s.players.find((_, idx) => {
-        // We need to reconstruct the draft order slot
-        return false; // handled below via the picks array
-      })
-    )] : null;
-    rows.push({ slot: i, isCurrent: i === s.pickIndex, filled: i < s.pickIndex });
+  if (s.phase !== 'draft') {
+    // ── Post-draft: roster summary + activity log ────────────────────────
+    const rosterHtml = s.players.map((p, idx) => {
+      const teams = p.teams.map(id => {
+        const t = local.allTeams.find(t => t.id === id);
+        return t ? `<span class="roster-team">${t.flag} ${t.name}</span>` : '';
+      }).join('');
+      return `<div class="roster-row">
+        <span class="roster-num" style="color:${playerColor(idx)}">${idx + 1}.</span>
+        <div class="roster-info">
+          <div class="roster-name" style="color:${playerColor(idx)}">${p.name}</div>
+          <div class="roster-teams">${teams || '<span class="text-sub">No teams</span>'}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const ACT_ICONS = { draft: '🎯', waiver: '🔄', trade: '🤝', system: '⚡' };
+    const actHtml = (s.activityLog || []).map(e => {
+      const ago = timeAgo(e.ts);
+      return `<div class="act-row act-${e.type}">
+        <span class="act-icon">${ACT_ICONS[e.type] || '•'}</span>
+        <div class="act-body">
+          <div class="act-text">${e.text}</div>
+          <div class="act-time">${ago}</div>
+        </div>
+      </div>`;
+    }).join('') || '<div class="act-empty">No activity yet.</div>';
+
+    list.innerHTML = `
+      <div class="sidebar-section-label">Rosters</div>
+      ${rosterHtml}
+      <div class="sidebar-section-label" style="margin-top:16px">Activity</div>
+      <div id="activity-feed">${actHtml}</div>`;
+    return;
   }
 
-  // Build a slot→{player,team} map from the picks log
-  // Since server doesn't return picks log, reconstruct from player.teams
-  // We know: draftOrder[i] = playerIndex (snake), and teams were added in draft order
-  const slotMap = [];
-  // Use players' teams arrays — teams[0] = 1st pick, teams[1] = 2nd pick, etc.
-  // Reconstruct by iterating over the draftOrder slots
+  // ── During draft: pick slots ─────────────────────────────────────────────
   const teamCounters = s.players.map(() => 0);
-
   let html = '';
   for (let i = 0; i < s.totalPicks; i++) {
-    const isCurrent = i === s.pickIndex && s.phase === 'draft';
+    const isCurrent = i === s.pickIndex;
     const isFilled = i < s.pickIndex;
-    // Find player for this slot — we don't have draftOrder on client; derive from snake pattern
     const numPlayers = s.players.length;
     const round = Math.floor(i / numPlayers);
     const posInRound = i % numPlayers;
@@ -163,8 +181,7 @@ function renderDraftBoard(s) {
     if (isFilled && player) {
       const teamIdx = teamCounters[playerIdx] || 0;
       teamCounters[playerIdx] = teamIdx + 1;
-      const teamId = player.teams[teamIdx];
-      const team = local.allTeams.find(t => t.id === teamId);
+      const team = local.allTeams.find(t => t.id === player.teams[teamIdx]);
       teamPart = team ? `<span class="pick-team">${team.flag} ${team.name}</span>` : '';
     }
 
@@ -351,22 +368,30 @@ function renderStandings(s) {
 
   // ── Podium 2: Goal Difference ────────────────────────────────────────────
   const gp = document.getElementById('goals-podium');
-  const hasGoals = s.standings.goalsPodium.some(r => r.goals > 0);
+  const hasGoals = s.standings.goalsPodium.some(r => r.totalGoals > 0);
   if (!hasGoals) {
     gp.innerHTML = '<div class="podium-empty">Appears once matches begin.</div>';
   } else {
     gp.innerHTML = s.standings.goalsPodium.map((row, i) => {
-      const team = local.allTeams.find(t => t.id === row.teamId);
-      const net = row.netGoals ?? (row.goals - (row.conceded || 0));
-      const netStr = net >= 0 ? `+${net}` : `${net}`;
+      const netStr = row.totalNet >= 0 ? `+${row.totalNet}` : `${row.totalNet}`;
+      const breakdown = row.teams.map(t => {
+        const team = local.allTeams.find(tm => tm.id === t.id);
+        const tNet = t.net >= 0 ? `+${t.net}` : `${t.net}`;
+        return `<div class="gd-team-row">
+          <span>${team?.flag || ''} ${team?.name || t.id}</span>
+          <span class="gd-team-net ${t.net >= 0 ? 'pos' : 'neg'}">${tNet}</span>
+          <span class="gd-team-detail">(${t.goals}–${t.conceded})</span>
+        </div>`;
+      }).join('');
       return `<div class="podium-row">
-        <div class="podium-medal">${medals[i]}</div>
+        <div class="podium-medal">${medals[i] || `${i+1}.`}</div>
         <div class="podium-info">
-          <div class="podium-owner">${row.owner}</div>
-          <div class="podium-team">${team?.flag || ''} ${team?.name || row.teamId}
-            <span class="podium-net ${net >= 0 ? 'pos' : 'neg'}">${netStr}</span>
-            <span class="podium-gd-detail">(${row.goals} scored – ${row.conceded ?? 0} conceded)</span>
+          <div class="podium-owner-row">
+            <span class="podium-owner">${row.owner}</span>
+            <span class="podium-net ${row.totalNet >= 0 ? 'pos' : 'neg'}">${netStr} GD</span>
+            <span class="podium-gd-detail">(${row.totalGoals} scored – ${row.totalConceded} conceded)</span>
           </div>
+          <div class="gd-breakdown">${breakdown}</div>
         </div>
       </div>`;
     }).join('');
@@ -975,6 +1000,14 @@ async function api(url, opts = {}) {
     });
     return res.json();
   } catch { return null; }
+}
+
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 function ordinal(n) {

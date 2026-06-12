@@ -99,6 +99,7 @@ let state = {
   pickIndex: 0,
   availableTeamIds: TEAMS.map(t => t.id),
   trades: [],
+  activityLog: [],       // [{ type, text, ts }]
   scores: {},            // { teamId: { goals, placement } }
   groupStandings: {},    // { 'A': [{teamId,name,played,won,draw,lost,gf,ga,gd,points}] }
   bracket: {},           // { GROUP_STAGE, ROUND_OF_32, ROUND_OF_16, QUARTER_FINALS, SEMI_FINALS, FINAL }
@@ -137,14 +138,17 @@ function findTeam(apiTeam) {
 // ── Standings / podiums (fantasy) ────────────────────────────────────────────
 
 function computeStandings() {
-  const teamsByGoals = Object.entries(state.scores)
-    .map(([id, s]) => ({ id, goals: s.goals, conceded: s.conceded || 0, netGoals: s.goals - (s.conceded || 0), placement: s.placement }))
-    .sort((a, b) => b.netGoals - a.netGoals || b.goals - a.goals || a.id.localeCompare(b.id));
-
-  const goalsPodium = teamsByGoals.slice(0, 3).map((t, i) => {
-    const owner = state.players.find(p => p.teams.includes(t.id));
-    return { rank: i + 1, teamId: t.id, goals: t.goals, conceded: t.conceded, netGoals: t.netGoals, owner: owner?.name || '(undrafted)' };
-  });
+  // Goal difference podium — aggregate across all teams each player owns
+  const goalsPodium = state.players.map(player => {
+    const teams = player.teams.map(id => {
+      const sc = state.scores[id] || {};
+      return { id, goals: sc.goals || 0, conceded: sc.conceded || 0, net: (sc.goals || 0) - (sc.conceded || 0) };
+    });
+    const totalNet = teams.reduce((s, t) => s + t.net, 0);
+    const totalGoals = teams.reduce((s, t) => s + t.goals, 0);
+    const totalConceded = teams.reduce((s, t) => s + t.conceded, 0);
+    return { owner: player.name, totalNet, totalGoals, totalConceded, teams };
+  }).sort((a, b) => b.totalNet - a.totalNet || b.totalGoals - a.totalGoals);
 
   const placedTeams = Object.entries(state.scores)
     .filter(([, s]) => s.placement)
@@ -262,6 +266,7 @@ app.get('/api/state', (_, res) => {
     currentPickerName: picker?.name || null,
     availableTeamIds: state.availableTeamIds,
     trades: state.trades,
+    activityLog: state.activityLog.slice(0, 50),
     scores: state.scores,
     standings: computeStandings(),
     groupStandings: state.groupStandings,
@@ -282,6 +287,7 @@ app.post('/api/setup', (req, res) => {
   state.pickIndex = 0;
   state.availableTeamIds = TEAMS.map(t => t.id);
   state.trades = [];
+  state.activityLog = [];
   TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, conceded: 0, placement: null }; });
   state.phase = 'draft';
 
@@ -297,12 +303,15 @@ app.post('/api/draft/pick', (req, res) => {
   if (!picker || picker.id !== playerId) return res.status(403).json({ error: 'Not your turn' });
   if (!state.availableTeamIds.includes(teamId)) return res.status(400).json({ error: 'Team not available' });
 
+  const team = TEAMS.find(t => t.id === teamId);
   picker.teams.push(teamId);
   state.availableTeamIds = state.availableTeamIds.filter(id => id !== teamId);
+  state.activityLog.unshift({ type: 'draft', text: `${picker.name} drafted ${team?.flag || ''} ${team?.name || teamId}`, ts: Date.now() });
   state.pickIndex++;
 
   if (state.pickIndex >= state.draftOrder.length) {
     state.phase = 'active';
+    state.activityLog.unshift({ type: 'system', text: 'Draft complete — game is live!', ts: Date.now() });
     console.log('Draft complete — game is now active');
     if (FOOTBALL_API_KEY) doSync();
   }
@@ -319,11 +328,14 @@ app.post('/api/waiver/pickup', (req, res) => {
   if (!state.availableTeamIds.includes(pickupTeamId)) return res.status(400).json({ error: 'Team not available' });
   if (!player.teams.includes(dropTeamId)) return res.status(400).json({ error: "You don't own that team" });
 
+  const pickup = TEAMS.find(t => t.id === pickupTeamId);
+  const drop = TEAMS.find(t => t.id === dropTeamId);
   player.teams = player.teams.filter(id => id !== dropTeamId);
   state.availableTeamIds = state.availableTeamIds.filter(id => id !== pickupTeamId);
   player.teams.push(pickupTeamId);
   state.availableTeamIds.push(dropTeamId);
 
+  state.activityLog.unshift({ type: 'waiver', text: `${player.name} picked up ${pickup?.flag || ''} ${pickup?.name || pickupTeamId}, dropped ${drop?.flag || ''} ${drop?.name || dropTeamId}`, ts: Date.now() });
   console.log(`Waiver: ${player.name} dropped ${dropTeamId}, picked up ${pickupTeamId}`);
   res.json({ success: true });
 });
@@ -363,6 +375,9 @@ app.post('/api/trade/respond', (req, res) => {
     to.teams = to.teams.filter(t => t !== trade.requestTeamId);
     to.teams.push(trade.offerTeamId);
     trade.status = 'accepted';
+    const offerTeam = TEAMS.find(t => t.id === trade.offerTeamId);
+    const reqTeam = TEAMS.find(t => t.id === trade.requestTeamId);
+    state.activityLog.unshift({ type: 'trade', text: `${from.name} traded ${offerTeam?.flag || ''} ${offerTeam?.name || trade.offerTeamId} to ${to.name} for ${reqTeam?.flag || ''} ${reqTeam?.name || trade.requestTeamId}`, ts: Date.now() });
   } else {
     trade.status = 'rejected';
   }
@@ -448,6 +463,7 @@ app.post('/api/reset', (req, res) => {
   state.pickIndex = 0;
   state.availableTeamIds = TEAMS.map(t => t.id);
   state.trades = [];
+  state.activityLog = [];
   state.groupStandings = {};
   state.bracket = {};
   TEAMS.forEach(t => { state.scores[t.id] = { goals: 0, conceded: 0, placement: null }; });
