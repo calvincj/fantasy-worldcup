@@ -882,7 +882,7 @@ function bindStaticEvents() {
   document.getElementById('add-player-btn').addEventListener('click', () => {
     const inputs = document.getElementById('player-inputs');
     const count = inputs.querySelectorAll('.player-input-row').length + 1;
-    if (count > 8) return;
+    if (count > 9) return;
     const row = document.createElement('div');
     row.className = 'player-input-row';
     row.innerHTML = `<input class="text-input" type="text" placeholder="Player ${count} name">
